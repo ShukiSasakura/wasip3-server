@@ -1,0 +1,7 @@
+[cli]
+url = "https://github.com/WebAssembly/wasi-cli/archive/refs/tags/v0.3.0-rc-2025-09-16.tar.gz"
+subdir = "wit-0.3.0-draft"
+
+[sockets]
+url = "https://github.com/WebAssembly/wasi-sockets/archive/refs/tags/v0.3.0-rc-2025-09-16.tar.gz"
+subdir = "wit-0.3.0-draft"

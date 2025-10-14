@@ -1,0 +1,12 @@
+[package]
+name = "wasip3-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wit-bindgen = "0.46.0"
+futures = { version = "0.3.31", default-features = false, features = ['alloc'] }
+
+[lib]
+crate-type = ["cdylib"]
+
