@@ -2,16 +2,16 @@ mod bindings {
     pub mod server;
 }
 
-use std::error::Error;
+// use std::error::Error;
 // use std::io::stdout;
 use std::net::Ipv4Addr;
 
 use crate::bindings::server::wasi::sockets::types::{
-    IpAddressFamily, IpSocketAddress, Ipv4SocketAddress, Ipv6SocketAddress, TcpSocket,
+    IpAddressFamily, IpSocketAddress, Ipv4SocketAddress, TcpSocket,
 };
-use crate::bindings::server::{exports, wit_stream, wasi::cli::environment, wasi::cli::stdout};
+use crate::bindings::server::{exports, wit_stream, wasi::cli::environment};
 use futures::join;
-use wit_bindgen::{AbiBuffer, StreamReader, StreamResult};
+use wit_bindgen::StreamResult;
 
 struct Component;
 
@@ -65,41 +65,55 @@ async fn tcp_app(family: IpAddressFamily, bind_address: IpSocketAddress) -> Resu
 
     // accept
     listener.set_listen_backlog_size(32).unwrap();
+    // TcpSocket を読み取るための StreamReader を作成
     let mut accept = listener.listen().unwrap();
-    let addr = listener.get_local_address().unwrap();
+    // let addr = listener.get_local_address().unwrap();
 
     loop {
         println!("wait accept");
+        // 接続してきた TcpSocket を読み出す
+        // TcpSocket はデータ送受信のための StreamReader を送受信できる
+        wit_bindgen::yield_async().await;
         let sock = accept.next().await.unwrap();
+        // wit_bindgen::yield_async().await;
 
         wit_bindgen::spawn(async move {
             // reveive rx for receiving data
+            println!("sock receive");
             let (mut data_rx, _fut) = sock.receive();
+
             // send tx for sending ack
             let (mut ack_tx, ack_rx) = wit_stream::new();
-            //TODO await するとハングアップ
-            // 原因はクライアントが WASI でないこと
-            // WASI 専用の send, recv, write, read を使っているため，通常の TCP クライアントと送受信できない
-            // 具体的には，send，write した際には受信側が recv，read を ready している必要がある？
-            let res = sock.send(ack_rx).await;
-            println!("sock send result: {:?}", res);
+            println!("join!");
+            join!(
+                async{
+                    println!("send ack_rx");
+                    let res = sock.send(ack_rx).await;
+                    println!("sock send result: {:?}", res);
+                },
+                async{
+                    // start waiting message
+                    loop {
+                        let buf = Vec::with_capacity(100);
+                        // receive message
+                        println!("wait receive message");
+                        let (r_result, r_data) = data_rx.read(buf).await;
+                        println!("r_result: {:?}", r_result);
+                        if r_result == StreamResult::Dropped {
+                            break;
+                        }
+                        // assert!(matches!(r_result, StreamResult::Complete(_)));
+                        println!("read data: {:?}", r_data);
 
-            // start waiting message
-            loop {
-                let mut buf = Vec::with_capacity(100);
-                // receive message
-                println!("wait receive message");
-                let (r_result, r_data) = data_rx.read(buf).await;
-                assert!(matches!(r_result, StreamResult::Complete(_)));
-                println!("read data: {:?}", r_data);
+                        // send ack
+                        println!("send ack");
+                        let (s_result, buffer) = ack_tx.write(r_data.into()).await;
+                        assert!(matches!(s_result, StreamResult::Complete(_)));
+                        println!("s_result: {:?}", s_result);
+                    }
+                }
+            );
 
-                // send ack
-                // TODO ack の返信がうまくいってないので原因の調査
-                println!("send ack");
-                let (s_result, buffer) = ack_tx.write(r_data.into()).await;
-                assert!(matches!(s_result, StreamResult::Complete(_)));
-                println!("s_result: {:?}", s_result);
-            }
         });
     }
 }
