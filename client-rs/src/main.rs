@@ -1,6 +1,8 @@
 use std::env;
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
+use std::thread::sleep;
+use std::time::Duration;
 
 fn main() -> Result<(), std::io::Error> {
 
@@ -22,22 +24,18 @@ fn main() -> Result<(), std::io::Error> {
         },
     };
 
-    let msg = b"Hello, World";
-    let mut buf: [u8; 1024] = [1; 1024];
+    let msg: [u8; 256] = [1; 256];
 
-    // sender role
-    stream.write_all(msg)?;
-    // println!("finish send");
- 
-    // loop{
-    //     std::thread::sleep(Duration::from_secs(5));
-    // }
- 
-    // receiver role
-    stream.read(&mut buf)?;
-    // stream.read_exact(&mut buf)?;
-    println!("finish read");
-    // println!("{:?}", buf);
+    for i in 0..3 {
+        stream.write_all(&msg)?;
+        println!("send message {}", i);
+
+        sleep(Duration::from_secs(3));
+
+        let mut ack: [u8; 256] = [0; 256];
+        stream.read(&mut ack)?;
+        println!("receive ack");
+    }
 
     Ok(())
 

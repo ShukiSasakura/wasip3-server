@@ -2,8 +2,6 @@ mod bindings {
     pub mod server;
 }
 
-// use std::error::Error;
-// use std::io::stdout;
 use std::net::Ipv4Addr;
 
 use crate::bindings::server::wasi::sockets::types::{
@@ -18,29 +16,18 @@ struct Component;
 bindings::server::export!(Component);
 
 impl exports::wasi::cli::run::Guest for Component {
-    async fn run() -> Result<(),()> {
-        let args = environment::get_arguments();
+    async fn run() -> Result<(), ()> {
 
-        if args.len() != 3 {
-            return Err(());
-        }
-
-        // Validate if args[1] is a valid IPv4 address
-        if args[1].parse::<std::net::Ipv4Addr>().is_err() {
-            return Err(());
-        }
-
-        // Validate if args[2] is convertible to u16
-        if args[2].parse::<u16>().is_err() {
-            return Err(());
-        }
-
-        let ipaddress_string = args[1].clone();
-        let port = args[2].parse::<u16>().map_err(|_| ())?;
-        // println!("ipaddress={:?}, port={:?}", ipaddress, port);
+        let (ip_string, port) =  match get_arg () {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!("Faild to get args");
+                return Err(());
+            },
+        };
 
         // ipaddress が 127.0.0.1 の形式なので split して address 引数に渡す
-        let ipaddress: Ipv4Addr = ipaddress_string.parse().expect("invalid IPv4 address");
+        let ipaddress: Ipv4Addr = ip_string.parse().expect("invalid IPv4 address");
         let octets = ipaddress.octets();
 
         tcp_app(
@@ -52,16 +39,39 @@ impl exports::wasi::cli::run::Guest for Component {
         )
             .await
 
-        // Ok(())
     }
 }
 
+fn get_arg () -> Result<(String, u16), ()> {
+    let args = environment::get_arguments();
+
+    if args.len() != 3 {
+        return Err(());
+    }
+
+    // Validate if args[1] is a valid IPv4 address
+    if args[1].parse::<std::net::Ipv4Addr>().is_err() {
+        return Err(());
+    }
+
+    // Validate if args[2] is convertible to u16
+    if args[2].parse::<u16>().is_err() {
+        return Err(());
+    }
+
+    let ip_string = args[1].clone();
+    let port: u16 = args[2].parse().unwrap();
+
+    Ok((ip_string, port))
+}
+
 async fn tcp_app(family: IpAddressFamily, bind_address: IpSocketAddress) -> Result<(),()> {
+    let mut id = 0;
+
     let listener = TcpSocket::create(family).unwrap();
 
     // bind
     listener.bind(bind_address).unwrap();
-    println!("bind:{:?}", bind_address);
 
     // accept
     listener.set_listen_backlog_size(32).unwrap();
@@ -70,7 +80,8 @@ async fn tcp_app(family: IpAddressFamily, bind_address: IpSocketAddress) -> Resu
     // let addr = listener.get_local_address().unwrap();
 
     loop {
-        println!("wait accept");
+        let client_id = id;
+        id += 1;
         // 接続してきた TcpSocket を読み出す
         // TcpSocket はデータ送受信のための StreamReader を送受信できる
         wit_bindgen::yield_async().await;
@@ -79,37 +90,30 @@ async fn tcp_app(family: IpAddressFamily, bind_address: IpSocketAddress) -> Resu
 
         wit_bindgen::spawn(async move {
             // reveive rx for receiving data
-            println!("sock receive");
             let (mut data_rx, _fut) = sock.receive();
 
             // send tx for sending ack
             let (mut ack_tx, ack_rx) = wit_stream::new();
-            println!("join!");
             join!(
                 async{
-                    println!("send ack_rx");
-                    let res = sock.send(ack_rx).await;
-                    println!("sock send result: {:?}", res);
+                    let _res = sock.send(ack_rx).await;
                 },
                 async{
                     // start waiting message
                     loop {
-                        let buf = Vec::with_capacity(100);
+                        let buf = Vec::with_capacity(256);
                         // receive message
-                        println!("wait receive message");
                         let (r_result, r_data) = data_rx.read(buf).await;
-                        println!("r_result: {:?}", r_result);
                         if r_result == StreamResult::Dropped {
                             break;
                         }
-                        // assert!(matches!(r_result, StreamResult::Complete(_)));
-                        println!("read data: {:?}", r_data);
+                        println!("read message from client {}", client_id);
 
                         // send ack
-                        println!("send ack");
-                        let (s_result, buffer) = ack_tx.write(r_data.into()).await;
-                        assert!(matches!(s_result, StreamResult::Complete(_)));
-                        println!("s_result: {:?}", s_result);
+                        let (s_result, _buffer) = ack_tx.write(r_data.into()).await;
+                        if s_result == StreamResult::Dropped {
+                            break;
+                        }
                     }
                 }
             );
